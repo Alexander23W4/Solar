@@ -1,0 +1,36 @@
+[build-system]
+requires =      # e.g. ["setuptools>=42", "wheel"]
+build-backend =         # e.g. "setuptools.build_meta"
+
+[project]
+name = "Solar"
+version = "1.1.0"
+description = "Your project description"
+readme = "README.md"
+requires-python = ">=3.9" 
+license =       # e.g. { text = "MIT" }
+authors = [
+  { name = " ", email = "2842wang6843w@gmail.com" },
+]
+dependencies = [
+
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "black>=24.0",
+  "ruff>=0.5.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
