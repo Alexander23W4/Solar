@@ -2,6 +2,9 @@ import pandas as pd
 import pvlib
 import numpy as np
 
+from AssemblyModule import AngleGenerator
+# python3 -m AngleModule.AngleHandler
+
 class AngleHandler:   
     """
     AngleHandler:  calculate the included angle between the light and the board
@@ -106,6 +109,38 @@ class AngleHandler:
 
 
 if __name__ == "__main__":
-    handler = AngleHandler()
-    result = handler.getAngle('2025-06-22 9:00')
-    print(result)
+    # handler = AngleHandler()
+    # result = handler.getAngle('2025-06-22 9:00')
+    # print(result)
+
+
+    # 1. Convert coordinates: 31°27'5" N, 119°29'0" E to decimal degrees
+    lat = 31 + 27/60 + 5/3600
+    lon = 119 + 29/60 + 0/3600
+    test_time = '2026-04-26 08:30'
+    
+    # 2. Initialize AngleHandler with target location parameters
+    handler = AngleHandler(latitude=lat, longitude=lon, timeZone='Asia/Shanghai')
+    
+    # 3. Initialize AngleGenerator for a 3-sided prism starting at 0 degrees
+    prism_gen = AngleGenerator(n=3, base_angle=25)
+    face_angles = prism_gen.generate()  # Expected: [0.0, 120.0, 240.0]
+    
+    # 4. Fetch and print the baseline solar data
+    sol_pos = handler.getAngle(test_time)
+    print(f"--- Location: Lat {lat:.4f}°, Lon {lon:.4f}° ---")
+    print(f"--- Simulation Time: {test_time} ---")
+    print(f"Solar Elevation: {sol_pos['apparent_elevation'].iloc[0]:.2f}°")
+    print(f"Solar Azimuth:   {sol_pos['azimuth'].iloc[0]:.2f}°\n")
+    
+    print("--- Incidence Angle Results for Each Prism Face ---")
+    # 5. Calculate and log metrics for each distinct prism orientation
+    for i, angle in enumerate(face_angles):
+        # Evaluate incidence angle using your original formula
+        incidence_angle = handler.AngleCombination(test_time, angle)
+        
+        # Verify sun visibility using your original boundary threshold logic
+        is_lit = handler.is_within_90(test_time, angle)
+        status = "(Illuminated)" if is_lit else "(In Shadow)"
+        
+        print(f"Face {i+1} (Heading {angle:5.1f}°): Incidence Angle = {incidence_angle:6.2f}° {status}")

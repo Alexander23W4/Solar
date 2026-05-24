@@ -34,7 +34,7 @@ def getSynthesisEfficiency(latitude, longitude, timeZone, year, month, day, hour
                     result += DNI * np.cos(angle_rad)
 
         # get平均辐照度
-        result = result / face
+        result = result / face 
         return result
 
 def getPowerObtainWithin_24h(latitude, longitude, timeZone, year, month, day, face, baseAngle):
