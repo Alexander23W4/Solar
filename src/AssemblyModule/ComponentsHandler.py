@@ -16,7 +16,7 @@ class AngleGenerator:
 
 
 if __name__ == "__main__":
-    gen1 = AngleGenerator(3, 0)
+    gen1 = AngleGenerator(3, 13.4)
     print(gen1.generate())  # [0.0, 120.0, 240.0]
 
     gen2 = AngleGenerator(4, 60)
