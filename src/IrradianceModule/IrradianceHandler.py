@@ -3,11 +3,14 @@ import pandas as pd
 import numpy as np
 
 class SolarIrradiance:
-    def __init__(self, latitude=-69.367, longitude=76.367, tz='Asia/Shanghai', linke_turbidity=3):
+    # latitude, longitude      timezone     linke_turbidity(transparency)    location_object
+    # linke_turbidity: 林克浑浊度系数，表示大气透明度  值越小（如2.0）→ 空气越清澈 → 辐射越强  值越大（如5.0）→ 空气越浑浊/污染 → 辐射越弱  范围通常 2-7
+    def __init__(self, latitude=-69.367, longitude=76.367, tz='Asia/Shanghai', linke_turbidity=2.0):
         self.latitude = latitude
         self.longitude = longitude
         self.tz = tz
         self.linke_turbidity = linke_turbidity
+        # self.location object for upcomming usage
         self.location = pvlib.location.Location(latitude=self.latitude,
                                                 longitude=self.longitude,
                                                 tz=self.tz)
@@ -15,13 +18,24 @@ class SolarIrradiance:
     def get_times(self, date_str='2025-12-22 12:00'):
         return pd.date_range(date_str, periods = 1, tz=self.tz)
 
+    # 应用get_clearsky函数的考量: 它非常适用于光伏系统设计的前期评估、选址分析，或者作为基准数据来识别实际天气中的“晴空”时刻
+
     def get_clearsky(self, date_str='2025-12-22 12:00'):
         times = self.get_times(date_str)
         return self.location.get_clearsky(times, model = 'ineichen', linke_turbidity = self.linke_turbidity)
 
+    # The following DNI(direct Normal irradiance) DHI(Diffuse Horizontal irridiance) GHI(Global Horizontal irridiance)
+    #   are purely got from PVLIB, we called 3 BASIC IRRIDIANCE ELEMENTS over here. (TBIE)
+    
+    #   三者的关系如下
+    # - DNI (直射): 直接到达地表的太阳光束
+    # - DHI (散射): 被大气散射后到达地表的辐射
+    # - GHI (总辐射): DNI(垂直分量) + DHI 的总和
+
+    # GHI = DNI × cos(太阳天顶角) + DHI
     def get_dni(self, date_str='2025-12-22 12:00'):
         clearsky = self.get_clearsky(date_str)
-        return clearsky['dni'].iloc[0]  # 返回单个数值 dni
+        return clearsky['dni'].iloc[0]
 
     def get_ghi(self, date_str='2025-12-22 12:00'):
         clearsky = self.get_clearsky(date_str)
@@ -31,6 +45,8 @@ class SolarIrradiance:
         clearsky = self.get_clearsky(date_str)
         return clearsky['dhi'].iloc[0]
 
+    
+    # 
     def hay_davies_diffuse(self, DHI, DNI, GHI, solar_zenith_deg, aoi_deg, tilt_deg=90, albedo=0.2):
         z = np.radians(solar_zenith_deg)
         aoi = np.radians(aoi_deg)

@@ -1,0 +1,145 @@
+BASIC IRRIDIANCE ELEMENTS  (TBIE)
+
+我的模型的目的主要是: 由于本模型的用途为:
+                    1.探究板子的面数对全年辐照度的影响
+                    2.作为基础辐照度算法探究雪损, IV, 阴影遮挡等对辐照度的影响 
+                    所以本模型只需尽可能的考虑更多的辐照度影响因素, 在大的方向的不出差错, 并且在水平对比时能够尽可能的得到可靠的结果.
+                    得到的全年辐照度的数值相对实地测试数值不必十分精确.
+我的代码部分主要就是: 1.多面入射角生成    2.TBIE的生成   3.融合TBIE得到单板(单双面)总辐照度功率   4.计算得到单个棱柱形光伏板组件全年总辐照度(J)
+
+--> 第一部分生成incident_angles这部分确定没有问题, 一切都非常清楚
+
+主要框架如下:
+
+pvlib库生成的 : azimuth方位角 -> 0度为正北,顺时针方向增加;  apparent_elevation俯仰角, 平行于地面为0度, 向上角度增加(这个与太阳天顶角Solar Zenith Angle, SZA是相反的)
+#      AngleGenerator 在生成 face_angles的时候, base_angle是第一个面的朝向, 数值是以正北为0度, 顺时针偏移的方向.
+# AngleHandler.getAngle (lat, lon, test_time -> apparent_elevation, azimuth) 
+# AngleGenerator (face angles)
+# AngleHandler.AngleCombination (face angles, test_time -> incidence_angles, Illuminated/In_Shadow)
+
+--> 第二部分: 
+几个变量需要充分考虑  用的是pvlib库的clearsky的模型, 这是个晴空模型, 对其使用的考量如下 
+(https://pvlib-python.readthedocs.io/en/v0.8.1/generated/pvlib.location.Location.get_clearsky.html#pvlib.location.Location.get_clearsky)
+https://pvlib-python.readthedocs.io/en/v0.10.2/user_guide/clearsky.html#detect-clearsky
+
+可以在给定时间和地点，计算出假设天空完全无云时，地表能接收到多少太阳辐射, 输出我们想要的TBIE
+适用于光伏系统设计的前期评估、选址分析，或者作为基准数据来识别实际天气中的“晴空”时刻
+
+官网对函数的介绍:
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+pvlib.location.Location.get_clearsky
+Location.get_clearsky(times, model='ineichen', solar_position=None, dni_extra=None, **kwargs)[source]
+Calculate the clear sky estimates of GHI, DNI, and/or DHI at this location.
+
+Parameters
+times (DatetimeIndex) –
+
+model (str, default 'ineichen') – The clear sky model to use. Must be one of ‘ineichen’, ‘haurwitz’, ‘simplified_solis’.
+
+solar_position (None or DataFrame, default None) – DataFrame with columns ‘apparent_zenith’, ‘zenith’, ‘apparent_elevation’.
+
+dni_extra (None or numeric, default None) – If None, will be calculated from times.
+
+kwargs – Extra parameters passed to the relevant functions. Climatological values are assumed in many cases. See source code for details!
+
+Returns
+clearsky (DataFrame) – Column names are: ghi, dni, dhi.
+
+Examples using pvlib.location.Location.get_clearsky
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+
+在clearsky的基础上, 经过调研, 我认为在得到TBIE的过程中, 需要在晴空模型的基础上增加 大气透明度的影响 和 云层的影响
+
+可以了解到:
+南极大陆是地球上最干燥的地方，云层多为冰晶云，光学厚度通常较薄，对辐照度的衰减效应远小于中低纬度地区的水云。
+所以根据我的模型目的考量, 本模型不考虑云层的影响
+
+
+之后就是考虑大气透明度, clearsky给出三种可行的量化方式, 对应三种模型: 
+
+ineichen:  	
+    林克浑浊度 (linke_turbidity)	
+    经典模型，参数易得。是光伏模拟的常见默认选择，适合大多数工程估算。	在太阳高度角极低时可能存在计算异常。该模型在日出日落时分，计算结果可能会产生非物理的尖峰，高纬度冬季尤其明显。
+simplified_solis:	
+    气溶胶光学厚度 (aod700) 大气可降水量 (precipitable_water)	
+    物理基础更强。分别考虑气溶胶和水汽的影响，理论上更精细，能更好地反映不同大气成分对辐射的衰减。	
+    对输入数据要求高。南极地区这两个参数的实测或高精度再分析资料可能较难获取，这是应用的主要门槛。
+haurwitz:
+    太阳天顶角	
+    极简模型。仅根据太阳位置计算GHI，不考虑大气透明度变化。	精度很低。
+    因为它完全不考虑大气状况，在南极这种大气环境特殊的地方，估算结果可能与实际偏差巨大，只能作为非常粗略的参考。
+
+首先考虑ineichen模型:
+
+ineichen模型是基于P. Ineichen 和 R. Perez 于 2002 年发表的 
+"A New airmass independent formulation for the Linke turbidity coefficient" (Solar Energy, vol 73, pp. 151-157)
+https://pvlib-python.readthedocs.io/en/v0.5.1/generated/pvlib.clearsky.ineichen.html#pvlib.clearsky.ineichen
+
+对于南极地区, 如果linke_turbidity给一个固定值, 那根据研究表明, 应该给2, 参考材料如下:
+https://epic.awi.de/id/eprint/28223/1/Polarforsch1988_1_4.pdf#1#1
+文章摘要中指出:  
+For Antarctica, Plateau and Mizuho Stations, both higher in altitude, had somewhat higher values, 
+while the values of the coastal stations were lower. We also calculated turbidity indices such as Linke's turbidity factor T and 
+Ångström's turbidity coefficient β. Mean values of T were around 2.0, 
+which are low values indeed. Beta values were around 0.04, a rather typical value for polar regions. 
+No trend in turbidity could be observed for the time of observation.
+
+
+如果我想要让模型在计算一段时间的总辐照度时更精确, 也可以使用动态值: 
+可以使用pvlib.clearsky.lookup_linke_turbidity这个函数
+它内置了一张名为 LinkeTurbidities.mat 的全球气候态平均林克浑浊度月平均数据表（分辨率约为0.083°），并提供了按月或按日（通过插值）返回浑浊度值的能力
+
+https://pvlib-python.readthedocs.io/en/v0.5.0/generated/pvlib.clearsky.lookup_linke_turbidity.html#pvlib.clearsky.lookup_linke_turbidity
+
+pvlib.clearsky.lookup_linke_turbidity(time, latitude, longitude, filepath=None, interp_turbidity=True)[source]
+Look up the Linke Turibidity from the LinkeTurbidities.mat data file supplied with pvlib.
+
+Parameters:	
+time : pandas.DatetimeIndex
+latitude : float
+longitude : float
+filepath : None or string, default None
+The path to the .mat file.
+interp_turbidity : bool, default True
+If True, interpolates the monthly Linke turbidity values found in LinkeTurbidities.mat to daily values.
+
+Returns:	
+turbidity : Series
+
+
+
+对于simplified_solis模型:
+
+P. Ineichen 于 2008 年发表了 "A broadband simplified version of the Solis clear sky model" (Solar Energy, 82, 758-762)。
+这篇论文提出了 simplified_solis 模型，它是一个基于辐射传输计算和 Lambert-Beer 关系的宽带简化版本，目的是为了在卫星图像处理等大规模计算中提高速度
+
+https://pvlib-python.readthedocs.io/en/v0.9.5/reference/generated/pvlib.clearsky.simplified_solis.html#pvlib.clearsky.simplified_solis
+
+
+
+
+--> 第三部分:
+这一部分经过了两次算法优化, 我对最终版本的算法和经典的Perez算法和针对于散射分量的Hay-Davis模型进行了对比, 
+可以明显看出, 我的最终版在南极地区辐照度计算的适用性已经可以超过Perez算法
+https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.irradiance.haydavies.html
+https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.irradiance.perez.html
+
+此为最终版公式: 
+TI(t)=DNI(t)*cos(AOI)*fIAM(AOI)+DHI(t)*fIAM,diff*((1+cosβ)/2)+ 	GHI(t)*αeff′(t)*((1-cosβ)/2)*fIAM,diff
+其中:αeff′(t)=[kdiff(t)*αws(t)+(1−kdiff(t))*αbs(θSun,t)]*0.98*flow_sun(γ)
+
+FIAM = (1 - exp(-cos(AOI) / a_r)) / (1 - exp(-1 / a_r)), 其中a_r取0.163
+FIAM_diff 取 0.986
+AOI：入射角，即太阳光线与光伏板法线（即板面的垂直线）的夹角，单位为度。
+kdiff(t) = DHI / GHI
+flow_sun(γ)为低太阳高度角对alpha_eff的修正系数, 主要针对kdiff这个比例进行修正
+a_r：角度损失系数，它是一个经验值，用于描述玻璃的光学特性
+αws为white sky albedo, αbs为black sky albedo, 这两个由BRDF卫星数据获得.
+
+分量	    Perez/Hay 标准形式	          我的公式	                                我的算法优势
+直接辐射	DNI × cos(AOI)	            DNI × cos(AOI) × fIAM(AOI)	              增加了 入射角修正因子（IAM），考虑玻璃/盖板对斜射光的透射率损失
+天空散射	DHI × (1+cosβ)/2	        DHI × fIAM,diff × (1+cosβ)/2	          增加了 散射光的 IAM 修正，更精确
+地面反射	GHI × albedo × (1−cosβ)/2	GHI × αeff′(t) × (1−cosβ)/2 × fIAM,diff	  完全定制：αeff′ 是动态有效反照率（含直射/散射比例加权、积雪老化修正）同样包含散射 IAM
+
+这一部分的code可以得到一个垂直摆放的n棱柱形光伏组件在南极地区某一时刻比较可靠的辐照度了
+

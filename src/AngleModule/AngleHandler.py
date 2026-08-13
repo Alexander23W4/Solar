@@ -2,8 +2,8 @@ import pandas as pd
 import pvlib
 import numpy as np
 
-from AssemblyModule import AngleGenerator
-# python3 -m AngleModule.AngleHandler
+from AssemblyModule.ComponentsHandler import AngleGenerator
+# python3 -m AngleModule.AngleHandler   # 这个文件地下的测试要这样才能运行
 
 class AngleHandler:   
     """
@@ -91,23 +91,33 @@ class AngleHandler:
             elev_rad = np.radians(apparent_elevation)
             az_diff_rad = np.radians(azimuth - angle)
 
-            # function：arccos(cos(elevation) * cos(azimuth - angle))
+            # function：arccos(cos(elevation) * cos(azimuth - angle))   这个是计算组合角的公式 cos*cos
             cos_value = np.cos(elev_rad) * np.cos(az_diff_rad)
 
             # ensure that cos_value is  between [-1, 1]
             cos_value = np.clip(cos_value, -1.0, 1.0)
 
             # cal arccos
-            result_rad = np.arccos(cos_value)
-            result_deg = np.degrees(result_rad)
+            result_rad = np.arccos(cos_value)      # 圆周角结果(rad为单位)
+            result_deg = np.degrees(result_rad)    # 角度角结果(度为单位)
             return result_deg
         else:
             # sun is below the horizon , return -1000
             return -1000.0
 
 
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+# 这部分的原理就是这些: 得到组合角
+# 注意: 这里pvlib库生成的 : azimuth方位角 -> 0度为正北,顺时针方向增加;  apparent_elevation俯仰角, 平行于地面为0度, 向上角度增加
+#      AngleGenerator 在生成 face_angles的时候, base_angle是第一个面的朝向, 数值是以正北为0度, 顺时针偏移的方向.
+# AngleHandler.getAngle (lat, lon, test_time -> apparent_elevation, azimuth) 
+# AngleGenerator (face angles)
+# AngleHandler.AngleCombination (face angles, test_time -> incidence_angles, Illuminated/In_Shadow)
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 
-
+# python3 -m AngleModule.AngleHandler   # 测试要这样才能运行
 if __name__ == "__main__":
     # handler = AngleHandler()
     # result = handler.getAngle('2025-06-22 9:00')
@@ -122,7 +132,7 @@ if __name__ == "__main__":
     # 2. Initialize AngleHandler with target location parameters
     handler = AngleHandler(latitude=lat, longitude=lon, timeZone='Asia/Shanghai')
     
-    # 3. Initialize AngleGenerator for a 3-sided prism starting at 0 degrees
+    # 3. Initialize AngleGenerator for a 3-sided prism starting at 0 degrees   (From ComponentsHandler)
     prism_gen = AngleGenerator(n=3, base_angle=25)
     face_angles = prism_gen.generate()  # Expected: [0.0, 120.0, 240.0]
     
@@ -144,3 +154,4 @@ if __name__ == "__main__":
         status = "(Illuminated)" if is_lit else "(In Shadow)"
         
         print(f"Face {i+1} (Heading {angle:5.1f}°): Incidence Angle = {incidence_angle:6.2f}° {status}")
+            

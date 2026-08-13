@@ -70,3 +70,5 @@ if __name__ == "__main__":
     for res in results:
         print(f"{res['Prism']:<8} | {res['Face']:<6} | {res['AOI']:<8.2f} | "
               f"{res['Shadow Area (m2)']:<10.4f} | {res['Shadow Ratio (%)']:<10.2f} | {res['Status']}")
+
+        
