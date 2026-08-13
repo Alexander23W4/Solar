@@ -362,8 +362,8 @@ if __name__ == "__main__":
     
     # 计算单个时刻
     test_time = '2025-12-22 12:00'
-    alpha_ws = 0.85
-    alpha_bs = 0.75
+    alpha_ws = 0.3
+    alpha_bs = 0.35
     
     result = prism_power.calculate_power(test_time, alpha_ws, alpha_bs)
     
