@@ -272,6 +272,10 @@ class PrismPowerCalculator:
         if apparent_elevation <= 0:
             return {
                 'moment': moment,
+                'latitude': self.latitude,
+                'longitude': self.longitude,
+                'apparent_elevation': apparent_elevation,   # 添加这个字段
+                'solar_azimuth': solar_azimuth,             # 添加这个字段
                 'total_power': 0.0,
                 'total_area': self.n_faces * self.face_area,
                 'weighted_avg_irradiance': 0.0,
@@ -343,7 +347,7 @@ class PrismPowerCalculator:
             'weighted_avg_irradiance': total_irradiance_weighted / total_area
         }
 
-
+# python3 -m IrradianceModule.TI_Handler
 if __name__ == "__main__":
     # 创建组件功率计算类
     prism_power = PrismPowerCalculator(
@@ -357,7 +361,7 @@ if __name__ == "__main__":
     )
     
     # 计算单个时刻
-    test_time = '2025-06-22 12:00'
+    test_time = '2025-12-22 12:00'
     alpha_ws = 0.85
     alpha_bs = 0.75
     

@@ -136,6 +136,15 @@ flow_sun(γ)为低太阳高度角对alpha_eff的修正系数, 主要针对kdiff�
 a_r：角度损失系数，它是一个经验值，用于描述玻璃的光学特性
 αws为white sky albedo, αbs为black sky albedo, 这两个由BRDF卫星数据获得.
 
+alpha_ws (白天空反照率)：指在完全阴天（各向同性散射光）条件下的反照率。由于天空散射光在各个方向较均匀，它对太阳角度不敏感，其值更接近于地表在不同季节的平均反照率。
+alpha_bs (黑天空反照率)：指在完全晴朗（直射光）条件下的反照率，它强烈依赖于太阳天顶角。在太阳高度角较低（如早晨、傍晚或极地冬季）时，alpha_bs 会明显升高。
+
+BRDF albedo数据的获取方法见官方文档:
+https://github.com/alisonboyer/mcd43-calculated-albedo 
+
+这里必须要说明, albedo的取值(这里的aws和abs)是否精确对最终
+
+
 分量	    Perez/Hay 标准形式	          我的公式	                                我的算法优势
 直接辐射	DNI × cos(AOI)	            DNI × cos(AOI) × fIAM(AOI)	              增加了 入射角修正因子（IAM），考虑玻璃/盖板对斜射光的透射率损失
 天空散射	DHI × (1+cosβ)/2	        DHI × fIAM,diff × (1+cosβ)/2	          增加了 散射光的 IAM 修正，更精确
