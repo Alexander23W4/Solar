@@ -141,11 +141,17 @@ alpha_ws (白天空反照率)：指在完全阴天（各向同性散射光）条
 alpha_bs (黑天空反照率)：指在完全晴朗（直射光）条件下的反照率，它强烈依赖于太阳天顶角。在太阳高度角较低（如早晨、傍晚或极地冬季）时，alpha_bs 会明显升高。
 
 BRDF albedo数据的获取方法见官方文档:
-https://github.com/alisonboyer/mcd43-calculated-albedo 
+https://github.com/alisonboyer/mcd43-calculated-albedo  (github)
+https://modis.gsfc.nasa.gov/data/dataprod/mod43.php   (官方网页)
+数据获取网页: MODIS/Terra+Aqua BRDF/Albedo Albedo Daily L3 Global - 500m V061 (V601版本是目前最新的数据)
+https://www.earthdata.nasa.gov/data/catalog/lpcloud-mcd43a3-061  (mcd43a3-061产品的官方网页)
+我从其中的AppEEARS(Application for Extracting and Exploring Analysis Ready Samples)针对性的提取中山站的数据
+https://appeears.earthdatacloud.nasa.gov/
 
 这里必须要说明, albedo的取值(这里的aws和abs)是否精确对最终辐照度的值与实际时间地点的测试值的误差大小影响非常大
 因为albedo是非常复杂的变量, 在不同季节不同的雪况下, 以中国长城站为例, abs的取值可能在一年中的不同时间取到0.2-0.85, 摇摆范围较大
-不仅如此, 不同地区由于气候环境雪况不同差异又非常大
+南极反照率的全年变化是一个受多种因素驱动的动态过程。除了季节和地理位置，雪粒径的演变、云量的短期波动、降雪和融化过程都会显著影响反照率的数值。
+不仅如此, 南极不同地区由于气候环境雪况不同差异又非常大
 即使我在已经给albedo赋予BRDF卫星数据而不是一个经验数据, 我认为依旧没有办法保证一个严谨的取值
 所以在实际情况下, 我认为aws和abs应该以具体研究地点的实际测量数据为准, 这是保证模型精度的关键
 
@@ -157,3 +163,14 @@ https://github.com/alisonboyer/mcd43-calculated-albedo
 
 这一部分的code可以得到一个垂直摆放的n棱柱形光伏组件在南极地区某一时刻比较可靠的辐照度了
 
+
+--> 第四部分
+
+接下来是不同参数下, 在
+经纬度坐标 (69.367°S, 76.367°E)，定位的是中国南极中山站的附近海域，具体来说是东南极普里兹湾沿岸的拉斯曼丘陵地区
+通过本模型生成全年辐照度数据, 然后对比
+
+主要测试 摆放角度(base_angle)  n棱柱(n_faces)  对全年辐照度的影响, 以此得出无遮挡单棱柱组件的最优面数和最优摆放角度
+
+在中山站得到初步结果之后
+还需要对南极其他地区做同样的测试, 来对比验证

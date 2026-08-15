@@ -254,28 +254,26 @@ class PrismPowerCalculator:
     def calculate_power(self, moment, alpha_ws, alpha_bs):
         """
         计算单个时刻棱柱组件所有面的辐照度和总功率
-        
-        参数:
-            moment: 时间字符串, 格式 'YYYY-MM-DD HH:MM', 如 '2025-06-22 9:00'
-            alpha_ws: 白天空反照率 (从BRDF数据获取)
-            alpha_bs: 黑天空反照率 (从BRDF数据获取, 需匹配当前太阳天顶角)
-            
-        返回:
-            dict: 包含所有面详细结果和总功率
         """
         # --> 获取太阳角度 elevation  azimuth
         solar_data = self.angle_handler.getAngle(moment)
         apparent_elevation = solar_data['apparent_elevation'].iloc[0]
         solar_azimuth = solar_data['azimuth'].iloc[0]
         
-        # 如果太阳在地平线以下，所有面功率为0
+        # 如果太阳在地平线以下
         if apparent_elevation <= 0:
             return {
                 'moment': moment,
                 'latitude': self.latitude,
                 'longitude': self.longitude,
-                'apparent_elevation': apparent_elevation,   # 添加这个字段
-                'solar_azimuth': solar_azimuth,             # 添加这个字段
+                'apparent_elevation': apparent_elevation,   
+                'solar_azimuth': solar_azimuth,
+                'dni': 0.0,
+                'ghi': 0.0,
+                'dhi': 0.0,
+                'kdiff': 1.0,
+                'alpha_ws': alpha_ws,
+                'alpha_bs': alpha_bs,
                 'total_power': 0.0,
                 'total_area': self.n_faces * self.face_area,
                 'weighted_avg_irradiance': 0.0,
@@ -286,16 +284,25 @@ class PrismPowerCalculator:
                         'aoi_deg': 90.0,
                         'TI': 0.0,
                         'power': 0.0,
+                        'fIAM_direct': 0.0,
+                        'alpha_eff': 0.0,
                         'sun_above_horizon': False
                     }
                     for i, face_azimuth in enumerate(self.face_azimuths)
                 ]
             }
         
-        # --> 获取基础辐射数据 dni ghi dhi
+        # --> 获取基础辐射数据
         dni = self.solar_irradiance.get_dni(moment)
         ghi = self.solar_irradiance.get_ghi(moment)
         dhi = self.solar_irradiance.get_dhi(moment)
+        
+        # 计算 kdiff
+        if ghi > 0:
+            kdiff = dhi / ghi
+            kdiff = np.clip(kdiff, 0.0, 1.0)
+        else:
+            kdiff = 1.0
         
         # --> 计算每个面的辐照度 
         face_results = []
@@ -304,10 +311,8 @@ class PrismPowerCalculator:
         total_area = self.n_faces * self.face_area
         
         for i, face_azimuth in enumerate(self.face_azimuths):
-            # 使用 AngleCombination 计算该面的入射角 AOI
             aoi_deg = self.angle_handler.AngleCombination(moment, face_azimuth)
             
-            # 调用 SingleFaceIrradiance 计算该面辐照度
             result = self.face_calculator.calculate(
                 dni=dni,
                 ghi=ghi,
@@ -318,9 +323,7 @@ class PrismPowerCalculator:
                 alpha_bs=alpha_bs
             )
             
-            # 计算该面功率 (W)
             face_power = result['TI'] * self.face_area
-            
             total_power += face_power
             total_irradiance_weighted += result['TI'] * self.face_area
             
@@ -341,6 +344,12 @@ class PrismPowerCalculator:
             'longitude': self.longitude,
             'apparent_elevation': apparent_elevation,
             'solar_azimuth': solar_azimuth,
+            'dni': dni,
+            'ghi': ghi,
+            'dhi': dhi,
+            'kdiff': kdiff,
+            'alpha_ws': alpha_ws,
+            'alpha_bs': alpha_bs,
             'face_results': face_results,
             'total_power': total_power,
             'total_area': total_area,
@@ -349,7 +358,7 @@ class PrismPowerCalculator:
 
 # python3 -m IrradianceModule.TI_Handler
 if __name__ == "__main__":
-    # 创建组件功率计算类
+    linke_turbidity = 2.0
     prism_power = PrismPowerCalculator(
         latitude=-69.367,
         longitude=76.367,
@@ -357,27 +366,48 @@ if __name__ == "__main__":
         n_faces=3,
         base_angle=0,
         face_area=1.0,
-        linke_turbidity=2.0
+        linke_turbidity=linke_turbidity
     )
     
-    # 计算单个时刻
     test_time = '2025-12-22 12:00'
     alpha_ws = 0.3
     alpha_bs = 0.35
     
     result = prism_power.calculate_power(test_time, alpha_ws, alpha_bs)
     
-    print(f"=== 测试时间: {test_time} ===")
+    # ========== 地理位置 ==========
+    print(f"=== 地理位置 ===")
+    print(f"纬度: {result['latitude']:.3f}°")
+    print(f"经度: {result['longitude']:.3f}°")
+    print(f"林克浑浊度 (Linke Turbidity): {linke_turbidity}")
+    
+    # ========== 太阳角度 ==========
+    print(f"\n=== 测试时刻: {test_time} ===")
     print(f"太阳高度角: {result['apparent_elevation']:.2f}°")
     print(f"太阳方位角: {result['solar_azimuth']:.2f}°")
-    print(f"\n棱柱各面结果 (共 {len(result['face_results'])} 面, 每面 {prism_power.face_area} m²):")
+    
+    # ========== 辐射参数 ==========
+    print(f"\n=== 辐射参数 ===")
+    print(f"DNI: {result['dni']:.2f} W/m²")
+    print(f"GHI: {result['ghi']:.2f} W/m²")
+    print(f"DHI: {result['dhi']:.2f} W/m²")
+    print(f"kdiff (DHI/GHI): {result['kdiff']:.4f}")
+    print(f"alpha_ws (白天空反照率): {result['alpha_ws']}")
+    print(f"alpha_bs (黑天空反照率): {result['alpha_bs']}")
+    
+    # ========== 各面结果 ==========
+    print(f"\n=== 棱柱各面结果 (共 {len(result['face_results'])} 面, 每面 {prism_power.face_area} m²) ===")
     
     for face in result['face_results']:
         status = "☀️" if face['sun_above_horizon'] else "🌙"
-        print(f"  面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°): "
-              f"AOI = {face['aoi_deg']:.1f}°, "
-              f"TI = {face['TI']:.2f} W/m², "
-              f"功率 = {face['power']:.2f} W {status}")
+        print(f"\n  面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°):")
+        print(f"    AOI           = {face['aoi_deg']:.1f}°")
+        print(f"    fIAM_direct   = {face['fIAM_direct']:.4f}")
+        print(f"    alpha_eff     = {face['alpha_eff']:.4f}")
+        print(f"    TI            = {face['TI']:.2f} W/m²")
+        print(f"    功率          = {face['power']:.2f} W {status}")
     
-    print(f"\n总功率: {result['total_power']:.2f} W")
+    # ========== 汇总 ==========
+    print(f"\n=== 汇总 ===")
+    print(f"总功率: {result['total_power']:.2f} W")
     print(f"加权平均辐照度: {result['weighted_avg_irradiance']:.2f} W/m²")
