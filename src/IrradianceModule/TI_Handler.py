@@ -661,6 +661,7 @@ if __name__ == "__main__":
     start_time = '2025-1-1 00:00'
     end_time = '2026-1-1 00:00'
     interval_hours = 4
+    base_angle = 10  # 定义 base_angle
 
     print(f"\n{'Faces':<6} {'Total Energy (kWh)':<20} {'Avg Irradiance (W/m²)':<25}")
     print("-" * 60)
@@ -676,7 +677,7 @@ if __name__ == "__main__":
             longitude=76.367,
             timezone='Asia/Shanghai',
             n_faces=n,
-            base_angle=0,
+            base_angle=base_angle,
             face_area=1.0,
             linke_turbidity=2.0
         )
@@ -721,7 +722,10 @@ if __name__ == "__main__":
         for x, val in zip(face_counts, total_energies):
             ax2.text(x, val + 50, f'{val:.0f}', ha='center', va='bottom', fontsize=8, color='coral')
         
-        plt.title(f'Number of Prism Faces vs Avg Irradiance and Total Energy\nTime Range: {start_time} to {end_time}, Interval: {interval_hours}h', fontsize=14)
+        # Title with base_angle info
+        plt.title(f'Number of Prism Faces vs Avg Irradiance and Total Energy\n'
+                f'Time Range: {start_time} to {end_time}, Interval: {interval_hours}h, Base Angle: {base_angle}°', 
+                fontsize=14)
         plt.xticks(face_counts)
         
         # Legend
@@ -731,9 +735,9 @@ if __name__ == "__main__":
         
         plt.tight_layout()
         
-        # ========== Save figure with timestamp ==========
+        # Save figure with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'prism_avg_irradiance_and_energy_{timestamp}.png'
+        filename = f'prism_avg_irradiance_and_energy_base{base_angle}_{timestamp}.png'
         plt.savefig(filename, dpi=150)
         print(f"\nFigure saved as: {filename}")
         
@@ -741,4 +745,3 @@ if __name__ == "__main__":
         plt.show()
     else:
         print("No data available for plotting")
-
