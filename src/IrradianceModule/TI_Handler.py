@@ -356,6 +356,218 @@ class PrismPowerCalculator:
             'weighted_avg_irradiance': total_irradiance_weighted / total_area
         }
 
+
+
+# 月份		 αws
+# 1月		0.81
+# 2月		0.83
+# 3月		0.85
+# 4月		0.87
+# 5月		0.88
+# 6月		0.89
+# 7月		0.89
+# 8月		0.88
+# 9月		0.87
+# 10月		0.85
+# 11月		0.83
+# 12月		0.82
+
+# αbs(θSun)=αws+0.08×max(0,cos(θSun)−0.3)
+
+ # 新增：月份到 alpha_ws 的查找表
+    def _get_alpha_ws_by_month(self, month):
+        """
+        根据月份返回 alpha_ws (白天空反照率)
+        
+        参数:
+            month: 月份 (1-12)
+        
+        返回:
+            alpha_ws: 该月的白天空反照率
+        """
+        month_aws = {
+            1: 0.81, 2: 0.83, 3: 0.85, 4: 0.87,
+            5: 0.88, 6: 0.89, 7: 0.89, 8: 0.88,
+            9: 0.87, 10: 0.85, 11: 0.83, 12: 0.82
+        }
+        return month_aws.get(month, 0.85)
+    
+    # 新增：根据 alpha_ws 和太阳天顶角计算 alpha_bs
+    def _calculate_alpha_bs(self, alpha_ws, solar_zenith_deg):
+        """
+        根据 alpha_ws 和太阳天顶角计算 alpha_bs (黑天空反照率)
+        
+        公式: alpha_bs(θSun) = alpha_ws + 0.08 * max(0, cos(θSun) - 0.3)
+        
+        参数:
+            alpha_ws: 白天空反照率
+            solar_zenith_deg: 太阳天顶角 (度)
+        
+        返回:
+            alpha_bs: 黑天空反照率
+        """
+        solar_zenith_rad = np.radians(solar_zenith_deg)
+        cos_zenith = np.cos(solar_zenith_rad)
+        correction = 0.08 * max(0, cos_zenith - 0.3)
+        return alpha_ws + correction
+    
+    # 新增：时间范围伪积分函数
+    def calculate_power_time_range(self, start_time, end_time, interval_hours=1):
+        """
+        计算指定时间范围内的总辐照度 (伪积分)
+        
+        参数:
+            start_time: 开始时间字符串, 格式 'YYYY-MM-DD HH:MM'
+            end_time: 结束时间字符串, 格式 'YYYY-MM-DD HH:MM'
+            interval_hours: 时间间隔 (小时), 默认1小时
+        
+        返回:
+            dict: 包含总能量和各面的累计结果
+        """
+        # 生成时间序列
+        times = pd.date_range(
+            start=start_time, 
+            end=end_time, 
+            freq=f'{interval_hours}h', 
+            tz=self.timezone
+        )
+        
+        if len(times) == 0:
+            print("错误: 时间范围无效")
+            return None
+        
+        # 存储每个时刻的结果
+        all_results = []
+        
+        print(f"=== 开始计算时间范围: {start_time} 到 {end_time} ===")
+        print(f"时间间隔: {interval_hours} 小时, 共 {len(times)} 个采样点\n")
+        
+        for i, time in enumerate(times):
+            moment_str = time.strftime('%Y-%m-%d %H:%M')
+            
+            # 提取月份, 自动获取 alpha_ws
+            month = time.month
+            alpha_ws = self._get_alpha_ws_by_month(month)
+            
+            # 获取太阳角度来计算 alpha_bs
+            solar_data = self.angle_handler.getAngle(moment_str)
+            apparent_elevation = solar_data['apparent_elevation'].iloc[0]
+            solar_zenith_deg = 90 - apparent_elevation
+            
+            # 计算 alpha_bs
+            alpha_bs = self._calculate_alpha_bs(alpha_ws, solar_zenith_deg)
+            
+            # 计算该时刻的功率
+            result = self.calculate_power(moment_str, alpha_ws=alpha_ws, alpha_bs=alpha_bs)
+            all_results.append(result)
+            
+            # 打印进度
+            if (i + 1) % 10 == 0 or i == len(times) - 1:
+                print(f"  已处理: {i+1}/{len(times)} 个时刻")
+        
+        print("\n=== 伪积分汇总 ===")
+        
+        # 初始化累计变量
+        face_energy = np.zeros(self.n_faces)          # 每个面的累计能量 (Wh)
+        face_valid_points = np.zeros(self.n_faces)    # 每个面的有效时间点数 (加权)
+        total_energy = 0.0                            # 所有面总能量 (Wh)
+        sun_above_count = 0                           # 太阳在地平线以上的采样点数
+        
+        # 遍历所有结果进行积分
+        for i, result in enumerate(all_results):
+            # 判断太阳是否在地平线以上 (只看一个面即可，所有面共用同一太阳位置)
+            if result['apparent_elevation'] > 0:
+                sun_above_count += 1
+                
+                # 梯形法权重: 首尾点权重0.5，中间点权重1.0
+                weight = 0.5 if (i == 0 or i == len(all_results) - 1) else 1.0
+                
+                # 累加总能量
+                total_energy += result['total_power'] * interval_hours * weight
+                
+                # 累加每个面的能量和有效时间点数
+                for j, face in enumerate(result['face_results']):
+                    face_energy[j] += face['power'] * interval_hours * weight
+                    face_valid_points[j] += weight
+        
+        # ========== 计算每个面的平均辐照度 ==========
+        face_avg_irradiance = np.zeros(self.n_faces)
+        for j in range(self.n_faces):
+            if face_valid_points[j] > 0:
+                face_avg_irradiance[j] = face_energy[j] / (face_valid_points[j] * interval_hours)
+            else:
+                face_avg_irradiance[j] = 0.0
+        
+        # ========== 计算整体加权平均辐照度 ==========
+        # 方法: 所有面总能量 / (所有面总面积 * 平均有效时间)
+        total_area = self.n_faces * self.face_area
+        if np.sum(face_valid_points) > 0:
+            avg_valid_points = np.mean(face_valid_points)  # 所有面的平均有效时间点数
+            avg_irradiance = total_energy / (total_area * avg_valid_points * interval_hours)
+        else:
+            avg_irradiance = 0.0
+        
+        # 计算总有效时间 (用于显示，取任意一个面的有效时间即可)
+        total_valid_time = face_valid_points[0] * interval_hours if self.n_faces > 0 else 0
+        
+        # ========== 输出结果 ==========
+        print(f"\n=== 地理位置 ===")
+        print(f"纬度: {self.latitude:.3f}°")
+        print(f"经度: {self.longitude:.3f}°")
+        
+        print(f"\n=== 时间范围 ===")
+        print(f"开始: {start_time}")
+        print(f"结束: {end_time}")
+        print(f"时间间隔: {interval_hours} 小时")
+        print(f"有效采样点数: {sun_above_count}/{len(times)} (太阳在地平线以上)")
+        print(f"有效总时间 (单面): {total_valid_time:.2f} 小时")
+        
+        print(f"\n=== 各面累计结果 (每面面积 {self.face_area} m²) ===")
+        for j in range(self.n_faces):
+            face_azimuth = self.face_azimuths[j]
+            print(f"\n  面 {j+1} (朝向 {face_azimuth:.1f}°):")
+            print(f"    累计能量: {face_energy[j]:.2f} Wh")
+            print(f"    平均辐照度: {face_avg_irradiance[j]:.2f} W/m²")
+            print(f"    有效时间: {face_valid_points[j] * interval_hours:.2f} 小时")
+        
+        print(f"\n=== 组件总累计结果 (所有 {self.n_faces} 面合计) ===")
+        print(f"总累计能量: {total_energy:.2f} Wh")
+        print(f"总累计能量: {total_energy/1000:.4f} kWh")
+        print(f"加权平均辐照度 (所有面): {avg_irradiance:.2f} W/m²")
+        
+        # 打印首个和末个时刻的详细信息
+        print(f"\n=== 首末时刻详细结果示例 ===")
+        for idx, moment_label in enumerate(['首个时刻', '末个时刻']):
+            result_idx = 0 if idx == 0 else -1
+            result = all_results[result_idx]
+            
+            print(f"\n  --- {moment_label}: {result['moment']} ---")
+            print(f"  太阳高度角: {result['apparent_elevation']:.2f}°")
+            print(f"  太阳方位角: {result['solar_azimuth']:.2f}°")
+            print(f"  kdiff: {result['kdiff']:.4f}")
+            print(f"  alpha_ws: {result['alpha_ws']:.3f}")
+            print(f"  alpha_bs: {result['alpha_bs']:.3f}")
+            print(f"  总功率: {result['total_power']:.2f} W")
+            
+            for face in result['face_results']:
+                status = "☀️" if face['sun_above_horizon'] else "🌙"
+                print(f"    面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°): "
+                      f"AOI={face['aoi_deg']:.1f}°, "
+                      f"TI={face['TI']:.2f} W/m², "
+                      f"功率={face['power']:.2f} W {status}")
+        
+        return {
+            'total_energy_wh': total_energy,
+            'total_energy_kwh': total_energy / 1000,
+            'face_energy_wh': face_energy,
+            'face_avg_irradiance': face_avg_irradiance,
+            'face_valid_time': face_valid_points * interval_hours,
+            'avg_irradiance': avg_irradiance,
+            'sun_above_count': sun_above_count,
+            'total_valid_time': total_valid_time,
+            'all_results': all_results
+        }
+
 # python3 -m IrradianceModule.TI_Handler
 if __name__ == "__main__":
     linke_turbidity = 2.0
@@ -363,51 +575,170 @@ if __name__ == "__main__":
         latitude=-69.367,
         longitude=76.367,
         timezone='Asia/Shanghai',
-        n_faces=3,
+        n_faces=1,
         base_angle=0,
         face_area=1.0,
         linke_turbidity=linke_turbidity
     )
     
-    test_time = '2025-12-22 12:00'
-    alpha_ws = 0.3
-    alpha_bs = 0.35
+    # # ========== 测试1: 单时刻计算 ==========
+    # print("=" * 60)
+    # print("测试1: 单时刻计算")
+    # print("=" * 60)
     
-    result = prism_power.calculate_power(test_time, alpha_ws, alpha_bs)
+    # test_time = '2025-12-22 12:00'
     
-    # ========== 地理位置 ==========
-    print(f"=== 地理位置 ===")
-    print(f"纬度: {result['latitude']:.3f}°")
-    print(f"经度: {result['longitude']:.3f}°")
-    print(f"林克浑浊度 (Linke Turbidity): {linke_turbidity}")
+    # # 获取该时刻的 alpha_ws 和 alpha_bs
+    # month = pd.to_datetime(test_time).month
+    # alpha_ws = prism_power._get_alpha_ws_by_month(month)
+    # solar_data = prism_power.angle_handler.getAngle(test_time)
+    # apparent_elevation = solar_data['apparent_elevation'].iloc[0]
+    # solar_zenith_deg = 90 - apparent_elevation
+    # alpha_bs = prism_power._calculate_alpha_bs(alpha_ws, solar_zenith_deg)
     
-    # ========== 太阳角度 ==========
-    print(f"\n=== 测试时刻: {test_time} ===")
-    print(f"太阳高度角: {result['apparent_elevation']:.2f}°")
-    print(f"太阳方位角: {result['solar_azimuth']:.2f}°")
+    # result_single = prism_power.calculate_power(test_time, alpha_ws, alpha_bs)
     
-    # ========== 辐射参数 ==========
-    print(f"\n=== 辐射参数 ===")
-    print(f"DNI: {result['dni']:.2f} W/m²")
-    print(f"GHI: {result['ghi']:.2f} W/m²")
-    print(f"DHI: {result['dhi']:.2f} W/m²")
-    print(f"kdiff (DHI/GHI): {result['kdiff']:.4f}")
-    print(f"alpha_ws (白天空反照率): {result['alpha_ws']}")
-    print(f"alpha_bs (黑天空反照率): {result['alpha_bs']}")
+    # print(f"=== 地理位置 ===")
+    # print(f"纬度: {result_single['latitude']:.3f}°")
+    # print(f"经度: {result_single['longitude']:.3f}°")
+    # print(f"林克浑浊度 (Linke Turbidity): {linke_turbidity}")
     
-    # ========== 各面结果 ==========
-    print(f"\n=== 棱柱各面结果 (共 {len(result['face_results'])} 面, 每面 {prism_power.face_area} m²) ===")
+    # print(f"\n=== 测试时刻: {test_time} ===")
+    # print(f"太阳高度角: {result_single['apparent_elevation']:.2f}°")
+    # print(f"太阳方位角: {result_single['solar_azimuth']:.2f}°")
     
-    for face in result['face_results']:
-        status = "☀️" if face['sun_above_horizon'] else "🌙"
-        print(f"\n  面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°):")
-        print(f"    AOI           = {face['aoi_deg']:.1f}°")
-        print(f"    fIAM_direct   = {face['fIAM_direct']:.4f}")
-        print(f"    alpha_eff     = {face['alpha_eff']:.4f}")
-        print(f"    TI            = {face['TI']:.2f} W/m²")
-        print(f"    功率          = {face['power']:.2f} W {status}")
+    # print(f"\n=== 辐射参数 ===")
+    # print(f"DNI: {result_single['dni']:.2f} W/m²")
+    # print(f"GHI: {result_single['ghi']:.2f} W/m²")
+    # print(f"DHI: {result_single['dhi']:.2f} W/m²")
+    # print(f"kdiff (DHI/GHI): {result_single['kdiff']:.4f}")
+    # print(f"alpha_ws (白天空反照率): {result_single['alpha_ws']:.3f}")
+    # print(f"alpha_bs (黑天空反照率): {result_single['alpha_bs']:.3f}")
     
-    # ========== 汇总 ==========
-    print(f"\n=== 汇总 ===")
-    print(f"总功率: {result['total_power']:.2f} W")
-    print(f"加权平均辐照度: {result['weighted_avg_irradiance']:.2f} W/m²")
+    # print(f"\n=== 棱柱各面结果 (共 {len(result_single['face_results'])} 面, 每面 {prism_power.face_area} m²) ===")
+    
+    # for face in result_single['face_results']:
+    #     status = "☀️" if face['sun_above_horizon'] else "🌙"
+    #     print(f"\n  面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°):")
+    #     print(f"    AOI           = {face['aoi_deg']:.1f}°")
+    #     print(f"    fIAM_direct   = {face['fIAM_direct']:.4f}")
+    #     print(f"    alpha_eff     = {face['alpha_eff']:.4f}")
+    #     print(f"    TI            = {face['TI']:.2f} W/m²")
+    #     print(f"    功率          = {face['power']:.2f} W {status}")
+    
+    # print(f"\n=== 汇总 ===")
+    # print(f"总功率: {result_single['total_power']:.2f} W")
+    # print(f"加权平均辐照度: {result_single['weighted_avg_irradiance']:.2f} W/m²")
+    
+    # # ========== 测试2: 时间范围伪积分 (新增) ==========
+    # print("\n" + "=" * 60)
+    # print("测试2: 时间范围伪积分")
+    # print("=" * 60)
+    
+    # start_time = '2025-1-22 12:00'
+    # end_time = '2026-1-22 12:00'
+    # interval_hours = 12
+    
+    # result_range = prism_power.calculate_power_time_range(
+    #     start_time=start_time,
+    #     end_time=end_time,
+    #     interval_hours=interval_hours
+    # )
+    
+    # if result_range:
+    #     print(f"\n=== 伪积分最终汇总 ===")
+    #     print(f"总累计能量: {result_range['total_energy_kwh']:.4f} kWh")
+    #     print(f"加权平均辐照度: {result_range['avg_irradiance']:.2f} W/m²")
+
+    # ========== 测试3: 多面扫描 (1-10面) ==========
+    import matplotlib.pyplot as plt
+    from datetime import datetime
+
+    print("\n" + "=" * 60)
+    print("Test 3: Multi-face Scan (1 to 10 faces)")
+    print("=" * 60)
+
+    start_time = '2025-1-1 00:00'
+    end_time = '2026-1-1 00:00'
+    interval_hours = 4
+
+    print(f"\n{'Faces':<6} {'Total Energy (kWh)':<20} {'Avg Irradiance (W/m²)':<25}")
+    print("-" * 60)
+
+    # 存储数据用于绘图
+    face_counts = []
+    avg_irradiances = []
+    total_energies = []
+
+    for n in range(1, 11):
+        prism_power = PrismPowerCalculator(
+            latitude=-69.367,
+            longitude=76.367,
+            timezone='Asia/Shanghai',
+            n_faces=n,
+            base_angle=0,
+            face_area=1.0,
+            linke_turbidity=2.0
+        )
+        
+        result_range = prism_power.calculate_power_time_range(
+            start_time=start_time,
+            end_time=end_time,
+            interval_hours=interval_hours
+        )
+        
+        if result_range:
+            print(f"{n:<6} {result_range['total_energy_kwh']:<20.4f} {result_range['avg_irradiance']:<25.2f}")
+            face_counts.append(n)
+            avg_irradiances.append(result_range['avg_irradiance'])
+            total_energies.append(result_range['total_energy_kwh'])
+
+    # ========== 绘制双轴柱状图 (平均辐照度 + 总能量) ==========
+    if face_counts and avg_irradiances and total_energies:
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+        
+        # Left axis: Avg Irradiance (bar chart)
+        bars = ax1.bar(face_counts, avg_irradiances, color='steelblue', 
+                    edgecolor='black', alpha=0.8, label='Avg Irradiance')
+        ax1.set_xlabel('Number of Faces (n)', fontsize=12)
+        ax1.set_ylabel('Weighted Avg Irradiance (W/m²)', fontsize=12, color='steelblue')
+        ax1.tick_params(axis='y', labelcolor='steelblue')
+        ax1.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Display values above bars
+        for bar, val in zip(bars, avg_irradiances):
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=8, color='steelblue')
+        
+        # Right axis: Total Energy (line chart)
+        ax2 = ax1.twinx()
+        line = ax2.plot(face_counts, total_energies, color='coral', marker='o', 
+                        linewidth=2, markersize=8, label='Total Energy')
+        ax2.set_ylabel('Total Energy (kWh)', fontsize=12, color='coral')
+        ax2.tick_params(axis='y', labelcolor='coral')
+        
+        # Display values on line points
+        for x, val in zip(face_counts, total_energies):
+            ax2.text(x, val + 50, f'{val:.0f}', ha='center', va='bottom', fontsize=8, color='coral')
+        
+        plt.title(f'Number of Prism Faces vs Avg Irradiance and Total Energy\nTime Range: {start_time} to {end_time}, Interval: {interval_hours}h', fontsize=14)
+        plt.xticks(face_counts)
+        
+        # Legend
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+        
+        plt.tight_layout()
+        
+        # ========== Save figure with timestamp ==========
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'prism_avg_irradiance_and_energy_{timestamp}.png'
+        plt.savefig(filename, dpi=150)
+        print(f"\nFigure saved as: {filename}")
+        
+        # Display figure
+        plt.show()
+    else:
+        print("No data available for plotting")
+
