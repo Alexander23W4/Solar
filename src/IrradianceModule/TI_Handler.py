@@ -691,7 +691,7 @@ if __name__ == "__main__":
     start_time = '2025-1-1 00:00'
     end_time = '2026-1-1 00:00'
     interval_hours = 4
-    base_angle = 30  # 定义 base_angle
+    base_angle = 0  # 定义 base_angle
 
     print(f"\n{'Faces':<6} {'Total Energy (kWh)':<20} {'Avg Irradiance (W/m²)':<25}")
     print("-" * 60)
@@ -704,8 +704,8 @@ if __name__ == "__main__":
 
     for n in range(1, 11):
         prism_power = PrismPowerCalculator(
-            latitude=-69.367,
-            longitude=76.367,
+            latitude=-80.417,
+            longitude=77.116,
             timezone='Asia/Shanghai',
             n_faces=n,
             base_angle=base_angle,
