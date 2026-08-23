@@ -473,6 +473,13 @@ class PrismPowerCalculator:
         total_energy = 0.0                            # 所有面总能量 (Wh)
         sun_above_count = 0                           # 太阳在地平线以上的采样点数
         
+        # ========== 进度能量记录 ==========
+        progress_energy = []                          # 每10%的累计能量 (kWh)
+        total_points = len(times)
+        step = max(1, total_points // 10)             # 每10%的步长
+        cumulative_energy_kwh = 0.0                   # 累计能量 (kWh)
+        last_recorded_progress = 0                    # 上次记录时的进度百分比
+        
         # 遍历所有结果进行积分
         for i, result in enumerate(all_results):
             # 判断太阳是否在地平线以上 (只看一个面即可，所有面共用同一太阳位置)
@@ -482,13 +489,22 @@ class PrismPowerCalculator:
                 # 梯形法权重: 首尾点权重0.5，中间点权重1.0
                 weight = 0.5 if (i == 0 or i == len(all_results) - 1) else 1.0
                 
-                # 累加总能量
-                total_energy += result['total_power'] * interval_hours * weight
+                # 累加总能量 (转换为kWh)
+                energy_wh = result['total_power'] * interval_hours * weight
+                total_energy += energy_wh
+                cumulative_energy_kwh += energy_wh / 1000
                 
                 # 累加每个面的能量和有效时间点数
                 for j, face in enumerate(result['face_results']):
                     face_energy[j] += face['power'] * interval_hours * weight
                     face_valid_points[j] += weight
+            
+            # ========== 每完成10%记录一次进度能量 ==========
+            current_progress = ((i + 1) / total_points * 100)
+            # 当进度达到下一个10%的整数倍时记录
+            if current_progress >= last_recorded_progress + 10 or i == len(all_results) - 1:
+                progress_energy.append(cumulative_energy_kwh)
+                last_recorded_progress = (int(current_progress / 10)) * 10
         
         # ========== 计算每个面的平均辐照度 ==========
         face_avg_irradiance = np.zeros(self.n_faces)
@@ -552,9 +568,15 @@ class PrismPowerCalculator:
             for face in result['face_results']:
                 status = "☀️" if face['sun_above_horizon'] else "🌙"
                 print(f"    面 {face['face_index']} (朝向 {face['face_azimuth']:.1f}°): "
-                      f"AOI={face['aoi_deg']:.1f}°, "
-                      f"TI={face['TI']:.2f} W/m², "
-                      f"功率={face['power']:.2f} W {status}")
+                    f"AOI={face['aoi_deg']:.1f}°, "
+                    f"TI={face['TI']:.2f} W/m², "
+                    f"功率={face['power']:.2f} W {status}")
+        
+        # 在返回前确保 progress_energy 至少有10个数据点
+        while len(progress_energy) < 10:
+            progress_energy.append(progress_energy[-1] if progress_energy else 0.0)
+        # 只保留前10个
+        progress_energy = progress_energy[:10]
         
         return {
             'total_energy_wh': total_energy,
@@ -565,7 +587,8 @@ class PrismPowerCalculator:
             'avg_irradiance': avg_irradiance,
             'sun_above_count': sun_above_count,
             'total_valid_time': total_valid_time,
-            'all_results': all_results
+            'all_results': all_results,
+            'progress_energy': progress_energy  # 确保返回10个数据点
         }
 
 # python3 -m IrradianceModule.TI_Handler
@@ -650,11 +673,16 @@ if __name__ == "__main__":
     #     print(f"总累计能量: {result_range['total_energy_kwh']:.4f} kWh")
     #     print(f"加权平均辐照度: {result_range['avg_irradiance']:.2f} W/m²")
 
+
 #             latitude=-69.367,
 #             longitude=76.367,
+
+#             昆仑站: -80.417 77.116 
+
     # ========== 测试3: 多面扫描 (1-10面) ==========
     import matplotlib.pyplot as plt
     from datetime import datetime
+    import numpy as np
 
     print("\n" + "=" * 60)
     print("Test 3: Multi-face Scan (1 to 10 faces)")
@@ -663,7 +691,7 @@ if __name__ == "__main__":
     start_time = '2025-1-1 00:00'
     end_time = '2026-1-1 00:00'
     interval_hours = 4
-    base_angle = 60  # 定义 base_angle
+    base_angle = 30  # 定义 base_angle
 
     print(f"\n{'Faces':<6} {'Total Energy (kWh)':<20} {'Avg Irradiance (W/m²)':<25}")
     print("-" * 60)
@@ -672,6 +700,7 @@ if __name__ == "__main__":
     face_counts = []
     avg_irradiances = []
     total_energies = []
+    progress_data = {}  # 新增：存储每个面数的进度能量数据
 
     for n in range(1, 11):
         prism_power = PrismPowerCalculator(
@@ -695,8 +724,12 @@ if __name__ == "__main__":
             face_counts.append(n)
             avg_irradiances.append(result_range['avg_irradiance'])
             total_energies.append(result_range['total_energy_kwh'])
+            
+            # 新增：存储进度能量数据
+            if 'progress_energy' in result_range:
+                progress_data[n] = result_range['progress_energy']
 
-    # ========== 绘制双轴柱状图 (平均辐照度 + 总能量) ==========
+    # ========== 图1: 绘制双轴柱状图 (平均辐照度 + 总能量) ==========
     if face_counts and avg_irradiances and total_energies:
         fig, ax1 = plt.subplots(figsize=(12, 6))
         
@@ -741,9 +774,90 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f'prism_avg_irradiance_and_energy_base{base_angle}_{timestamp}.png'
         plt.savefig(filename, dpi=150)
-        print(f"\nFigure saved as: {filename}")
+        print(f"\nFigure 1 saved as: {filename}")
         
         # Display figure
         plt.show()
     else:
         print("No data available for plotting")
+
+    # ========== 图2: 区间平均辐照度曲线 (每10%区间的平均辐照度, 已除以面数) ==========
+    if progress_data:
+        fig2, ax3 = plt.subplots(figsize=(12, 7))
+        
+        # 生成进度标签 (10% 到 100%)
+        progress_labels = [f'{i*10}%' for i in range(1, 11)]
+        x_positions = np.arange(1, 11)  # 1到10，代表10个进度点
+        
+        # 使用颜色映射，让线条颜色渐变
+        colors = plt.cm.viridis(np.linspace(0, 1, len(progress_data)))
+        
+        # 为每个面数绘制一条折线
+        for idx, (n, energies) in enumerate(sorted(progress_data.items())):
+            # 确保有足够的数据点
+            if len(energies) < 2:
+                continue
+            
+            # 只取前10个累计值
+            if len(energies) > 10:
+                energies = energies[:10]
+            
+            # 计算区间增量能量 (每个10%区间的能量)
+            incremental_energies = []
+            prev = 0.0
+            for val in energies:
+                incremental_energies.append(val - prev)
+                prev = val
+            
+            # 如果数据点少于10个，用0填充
+            while len(incremental_energies) < 10:
+                incremental_energies.append(0.0)
+            
+            # ========== 计算区间平均辐照度 (每个面的平均) ==========
+            # 总有效时间从 result_range 中获取
+            total_valid_hours = result_range['total_valid_time'] if 'result_range' in locals() else 8760
+            interval_hours_per_segment = total_valid_hours / 10
+            
+            # 计算每个面的平均辐照度 = 区间能量 / (面数 * 区间时间)
+            avg_irradiance_per_interval = []
+            for inc_energy in incremental_energies[:10]:
+                if interval_hours_per_segment > 0:
+                    # 除以 n (面数) 得到每个面的平均辐照度
+                    avg_irr = (inc_energy * 1000) / (n * interval_hours_per_segment)  # kWh -> Wh, 再除以面数
+                else:
+                    avg_irr = 0.0
+                avg_irradiance_per_interval.append(avg_irr)
+            
+            # 绘制折线
+            ax3.plot(x_positions, avg_irradiance_per_interval, 
+                    marker='o', linewidth=2, markersize=5, 
+                    color=colors[idx], label=f'n={n}')
+            
+            # 在峰值点显示数值
+            max_idx = np.argmax(avg_irradiance_per_interval)
+            ax3.text(x_positions[max_idx] + 0.1, avg_irradiance_per_interval[max_idx] + 1, 
+                    f'{avg_irradiance_per_interval[max_idx]:.1f}', 
+                    fontsize=7, ha='left', va='bottom')
+        
+        ax3.set_xlabel('Progress (Time Intervals)', fontsize=12)
+        ax3.set_ylabel('Average Irradiance per Face (W/m²)', fontsize=12)
+        ax3.set_title(f'Average Irradiance per Face Across Time Intervals for Different Prism Faces\n'
+                    f'Time Range: {start_time} to {end_time}, Base Angle: {base_angle}°, Interval: {interval_hours}h', 
+                    fontsize=14)
+        ax3.set_xticks(x_positions)
+        ax3.set_xticklabels(progress_labels)
+        ax3.grid(True, linestyle='--', alpha=0.3)
+        ax3.legend(loc='upper left', title='Number of Faces', fontsize=9)
+        
+        plt.tight_layout()
+        
+        # Save figure with timestamp
+        timestamp2 = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename2 = f'prism_avg_irradiance_distribution_base{base_angle}_{timestamp2}.png'
+        plt.savefig(filename2, dpi=150)
+        print(f"\nFigure 2 saved as: {filename2}")
+        
+        # Display figure
+        plt.show()
+    else:
+        print("No progress data available for plotting")
