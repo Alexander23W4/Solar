@@ -311,7 +311,7 @@ if __name__ == "__main__":
     start_time = '2025-1-1 00:00'
     end_time = '2026-1-1 00:00'
     interval_hours = 4
-    base_angle = 0
+    base_angle = 60
     albedo = 0.85  # 南极冰雪高反照率
 
     print(f"\n{'Faces':<6} {'Total Energy (kWh)':<20} {'Avg Irradiance (W/m²)':<25}")
